@@ -9,6 +9,11 @@ on:
       - 'build.sh'
       - '.github/workflows/release.yml'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing version tag to build and publish (leave empty for test build)'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -33,12 +38,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
+      - name: Validate recovery tag
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ -n "$RECOVERY_TAG" && ! "$RECOVERY_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Recovery tag must have the format v1.2.3.' >&2
+            exit 1
+          fi
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - name: Determine version
         shell: bash
         env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ inputs.release_tag && 'tag' || github.ref_type }}
+          REF_NAME: ${{ inputs.release_tag || github.ref_name }}
         run: |
           if [[ "$REF_TYPE" == "tag" ]]; then
             if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -74,7 +89,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -90,7 +105,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
           cat > release-notes.md <<'NOTES'
@@ -100,16 +115,20 @@ jobs:
 
           These builds are ad-hoc signed, not Apple Developer ID signed or notarized. macOS Gatekeeper may block downloaded copies. SHA-256 checksum files are included.
           NOTES
-          # Create as a draft so all assets arrive before the release becomes public.
-          # A rerun can finish an interrupted draft, but never replaces a published release.
-          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
-            if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]]; then
-              echo 'This version is already published. Push a new version tag.' >&2
-              exit 1
-            fi
-          else
+          # Recover an existing release by adding missing files, never replacing downloads.
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --draft \
               --title "QR Studio $RELEASE_TAG" --notes-file release-notes.md --generate-notes
           fi
-          gh release upload "$RELEASE_TAG" release-assets/* --clobber
-          gh release edit "$RELEASE_TAG" --draft=false
+          existing_assets="$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')"
+          for asset in release-assets/*; do
+            name="$(basename "$asset")"
+            if printf '%s\n' "$existing_assets" | grep -Fxq "$name"; then
+              echo "Keeping existing asset: $name"
+            else
+              gh release upload "$RELEASE_TAG" "$asset"
+            fi
+          done
+          if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" == true ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false
+          fi

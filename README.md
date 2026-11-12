@@ -42,9 +42,9 @@ git tag -a v1.0.1 -m "Release 1.0.1"
 git push origin v1.0.1
 ```
 
-Use a new `vMAJOR.MINOR.PATCH` tag each time. Do not move or reuse published tags. The release appears only after both builds and their QR self-tests pass. Interrupted draft releases can be completed by rerunning the workflow; published assets are never overwritten by a rerun.
+Use a new `vMAJOR.MINOR.PATCH` tag each time. Do not move or reuse published tags. The release appears only after both builds and their QR self-tests pass. Interrupted or empty releases can be completed with the manual recovery option; existing download assets are never overwritten.
 
-For a build without publishing, choose **Actions → Build and release macOS app → Run workflow**. Download the build artifacts from the workflow run. Pull requests touching the app or workflow also run both builds. Manual and pull-request builds use version `0.0.0`.
+For a build without publishing, choose **Actions → Build and release macOS app → Run workflow**. Download the build artifacts from the workflow run. Pull requests touching the app or workflow also run both builds. Manual builds without a release tag and pull-request builds use version `0.0.0`. To recover an existing release, run the workflow from the default branch and enter its tag (for example `v1.0.1`) in **release_tag**. This builds the source at that tag and attaches missing assets to its release.
 
 Downloads: https://github.com/Miklosimate/qr-studio-menubar/releases/latest
 
