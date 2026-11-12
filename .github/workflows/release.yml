@@ -1,0 +1,115 @@
+name: Build and release macOS app
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'Sources/**'
+      - 'build.sh'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+            label: Apple-Silicon
+          - runner: macos-15-intel
+            arch: x86_64
+            label: Intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine version
+        shell: bash
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo 'Release tags must have the format v1.2.3.' >&2
+              exit 1
+            fi
+            echo "VERSION=${REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo 'VERSION=0.0.0' >> "$GITHUB_ENV"
+          fi
+      - name: Build, sign locally, and test
+        env:
+          ARCH: ${{ matrix.arch }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          OUTPUT_DIR: ${{ runner.temp }}/qr-studio-build
+        run: bash build.sh
+      - name: Package application
+        env:
+          ARCH_LABEL: ${{ matrix.label }}
+          BUILD_DIR: ${{ runner.temp }}/qr-studio-build
+        run: |
+          mkdir -p release-assets
+          archive="QR-Studio-${VERSION}-macOS-${ARCH_LABEL}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$BUILD_DIR/QR Studio.app" "release-assets/$archive"
+          cd release-assets
+          shasum -a 256 "$archive" > "$archive.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macOS-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish release with downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Download **Apple-Silicon** for M-series Macs or **Intel** for Intel Macs. Requires macOS 12 or newer.
+
+          Unzip, move QR Studio.app to Applications, and open it. Use the QR icon in the menu bar to generate or drag out a transparent vector SVG.
+
+          These builds are ad-hoc signed, not Apple Developer ID signed or notarized. macOS Gatekeeper may block downloaded copies. SHA-256 checksum files are included.
+          NOTES
+          # Create as a draft so all assets arrive before the release becomes public.
+          # A rerun can finish an interrupted draft, but never replaces a published release.
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+            if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]]; then
+              echo 'This version is already published. Push a new version tag.' >&2
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "QR Studio $RELEASE_TAG" --notes-file release-notes.md --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false

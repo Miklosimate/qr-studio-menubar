@@ -169,8 +169,8 @@ if CommandLine.arguments.contains("--self-test") {
     do {
         let qr = try QR.make("https://example.com/qr?a=1&b=two")
         let svg = qr.svg(hex: "#573a8c")
-        assert(svg.contains("fill=\"#573a8c\"")); assert(!svg.contains("<image")); assert(!svg.contains("<rect"))
-        for y in 0..<qr.size { for x in 0..<qr.size where x < 4 || y < 4 || x >= qr.size - 4 || y >= qr.size - 4 { assert(!qr.cells[y * qr.size + x]) } }
+        precondition(svg.contains("fill=\"#573a8c\"")); precondition(!svg.contains("<image")); precondition(!svg.contains("<rect"))
+        for y in 0..<qr.size { for x in 0..<qr.size where x < 4 || y < 4 || x >= qr.size - 4 || y >= qr.size - 4 { precondition(!qr.cells[y * qr.size + x]) } }
         // Render exported matrix independently and decode with Apple's QR detector.
         let scale = 8, width = qr.size * scale
         var data = [UInt8](repeating: 255, count: width * width * 4)
@@ -180,7 +180,7 @@ if CommandLine.arguments.contains("--self-test") {
         let decoded = detector.features(in: image).compactMap { ($0 as? CIQRCodeFeature)?.messageString }
         guard decoded.contains("https://example.com/qr?a=1&b=two") else { throw Failure.message("QR decode failed: \(decoded)") }
         for bad in ["", "example.com", "javascript:alert(1)", "https://example.com/" + String(repeating: "a", count: 2000)] { do { _ = try QR.make(bad); fatalError("Accepted invalid URL") } catch {} }
-        assert(parseColor("#abc") == nil); assert(parseColor("#123456") != nil)
+        precondition(parseColor("#abc") == nil); precondition(parseColor("#123456") != nil)
         if let index = CommandLine.arguments.firstIndex(of: "--export-test"), CommandLine.arguments.count > index + 1 { try svg.write(toFile: CommandLine.arguments[index + 1], atomically: true, encoding: .utf8) }
         print("PASS: QR decoding, transparent vector export, quiet zone, input validation.")
     } catch { fputs("FAIL: \(error)\n", stderr); exit(1) }
