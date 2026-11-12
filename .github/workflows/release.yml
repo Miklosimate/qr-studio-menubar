@@ -78,14 +78,34 @@ jobs:
           mkdir -p release-assets
           archive="QR-Studio-${VERSION}-macOS-${ARCH_LABEL}.zip"
           ditto -c -k --sequesterRsrc --keepParent "$BUILD_DIR/QR Studio.app" "release-assets/$archive"
+          staging="$RUNNER_TEMP/qr-studio-dmg"
+          mkdir -p "$staging"
+          ditto "$BUILD_DIR/QR Studio.app" "$staging/QR Studio.app"
+          ln -s /Applications "$staging/Applications"
+          disk_image="QR-Studio-${VERSION}-macOS-${ARCH_LABEL}.dmg"
+          hdiutil create -volname "QR Studio" -srcfolder "$staging" \
+            -format UDZO -ov "release-assets/$disk_image"
+          hdiutil verify "release-assets/$disk_image"
           cd release-assets
           shasum -a 256 "$archive" > "$archive.sha256"
+          shasum -a 256 "$disk_image" > "$disk_image.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: macOS-${{ matrix.arch }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 14
+      - name: Explain where to find downloads
+        env:
+          RECOVERY_TAG: ${{ inputs.release_tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == workflow_dispatch && -z "$RECOVERY_TAG" ]]; then
+            echo '### Build only — no GitHub Release published' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Download ZIP and DMG files from the artifacts on this run. To publish, start a new run from the default branch and set release_tag to an existing version tag such as v1.0.1.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'ZIP and DMG files are uploaded as build artifacts. The release job publishes them after both architectures pass.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   release:
     name: Publish GitHub Release
@@ -111,7 +131,7 @@ jobs:
           cat > release-notes.md <<'NOTES'
           Download **Apple-Silicon** for M-series Macs or **Intel** for Intel Macs. Requires macOS 12 or newer.
 
-          Unzip, move QR Studio.app to Applications, and open it. Use the QR icon in the menu bar to generate or drag out a transparent vector SVG.
+          Open the DMG and drag QR Studio.app to Applications, or unzip the ZIP and move the app to Applications. Use the QR icon in the menu bar to generate or drag out a transparent vector SVG.
 
           These builds are ad-hoc signed, not Apple Developer ID signed or notarized. macOS Gatekeeper may block downloaded copies. SHA-256 checksum files are included.
           NOTES
