@@ -104,8 +104,8 @@ jobs:
           # A rerun can finish an interrupted draft, but never replaces a published release.
           if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
             if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" != true ]]; then
-              echo 'This version is already published. Push a new version tag.' >&2
-              exit 1
+              echo "Release $RELEASE_TAG is already published. Skipping upload to avoid replacing assets."
+              exit 0
             fi
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft \
